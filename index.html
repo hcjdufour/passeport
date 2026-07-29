@@ -563,7 +563,7 @@ function OriginTab({ origin, setOrigin, originData, accessCount, geo }) {
     if (name === origin) return { fill: COLORS.accentGreen, opacity: 1 }; // on a toujours accès à son propre pays
     if (visaFreeSet.has(name)) return { fill: COLORS.accentGreen, opacity: 1 };
     if (voaSet.has(name)) return { fill: COLORS.accentGreen, opacity: 0.5 };
-    return { fill: COLORS.missing, opacity: 0.12 };
+    return { fill: COLORS.missing, opacity: 0.55 };
   }
 
   return (
@@ -856,8 +856,8 @@ function WorldMapView({ geo, cellStyle, height = 320, emptyHint = "Touchez un pa
                   const dAttr = geoLayer.matched[d.name]; if (!dAttr) return null;
                   const st = cellStyle(d.name);
                   return (
-                    <path key={d.name} d={dAttr} fill={st.fill} opacity={st.opacity}
-                      stroke={COLORS.ink} strokeOpacity="0.35" strokeWidth="0.6"
+                    <path key={d.name} d={dAttr} fill={st.fill} fillOpacity={st.opacity}
+                      stroke={COLORS.ink} strokeOpacity="0.45" strokeWidth="0.6"
                       onClick={() => setHover(d.name)} onMouseEnter={() => setHover(d.name)}>
                       <title>{d.name}</title>
                     </path>
@@ -868,8 +868,8 @@ function WorldMapView({ geo, cellStyle, height = 320, emptyHint = "Touchez un pa
                   const pt = geoLayer.projection(c); if (!pt) return null;
                   const st = cellStyle(d.name);
                   return (
-                    <circle key={d.name} cx={pt[0]} cy={pt[1]} r="4.5" fill={st.fill} opacity={st.opacity}
-                      stroke="#fff" strokeWidth="0.8"
+                    <circle key={d.name} cx={pt[0]} cy={pt[1]} r="4.5" fill={st.fill} fillOpacity={st.opacity}
+                      stroke={COLORS.ink} strokeOpacity="0.5" strokeWidth="0.8"
                       onClick={() => setHover(d.name)} onMouseEnter={() => setHover(d.name)}>
                       <title>{d.name} (micro-État, marqueur)</title>
                     </circle>
@@ -883,8 +883,8 @@ function WorldMapView({ geo, cellStyle, height = 320, emptyHint = "Touchez un pa
                 return (
                   <rect key={d.name} x={g.col * cellW + 0.6} y={g.row * cellH + 0.6}
                     width={cellW - 1.2} height={cellH - 1.2} rx="1.2"
-                    fill={st.fill} opacity={st.opacity}
-                    stroke={COLORS.ink} strokeOpacity="0.18" strokeWidth="0.5"
+                    fill={st.fill} fillOpacity={st.opacity}
+                    stroke={COLORS.ink} strokeOpacity="0.3" strokeWidth="0.5"
                     onClick={() => setHover(d.name)} onMouseEnter={() => setHover(d.name)}>
                     <title>{d.name}</title>
                   </rect>
@@ -909,8 +909,8 @@ function MapTab({ originAccess, restOriginList, selectedPrograms, accessSets, to
     const idx = coveringIndices(name);
     const inOrigin = originAccess.has(name);
     if (idx.length > 0) return { fill: colorForIndices(idx), opacity: 1 };
-    if (inOrigin) return { fill: COLORS.missing, opacity: 0.55 }; // perdu : grisé, opacité faible
-    return { fill: COLORS.missing, opacity: 0.12 }; // jamais concerné : quasi invisible
+    if (inOrigin) return { fill: COLORS.missing, opacity: 0.7 }; // perdu : bien visible, grisé
+    return { fill: COLORS.missing, opacity: 0.45 }; // jamais concerné : visible mais en retrait
   }
 
   return (
@@ -968,7 +968,7 @@ const COLORS = {
   line: "#E7E7E3", card: "#FFFFFF",
   // alias conservés pour compatibilité interne
   brass: "#0F6E5C", stampRed: "#D14343", stampGreen: "#1E8E5A",
-  originFree: "#1E8E5A", addedFree: "#2C5C86", missing: "#DEDEDA",
+  originFree: "#1E8E5A", addedFree: "#2C5C86", missing: "#C6C6BF",
 };
 const CELL_COLORS = { kept: COLORS.originFree, lost: COLORS.stampRed, bonus: COLORS.addedFree, outscope: COLORS.missing };
 
