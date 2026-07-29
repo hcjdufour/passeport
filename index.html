@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<title>Planificateur de nationalité</title>
+<meta name="description" content="Simulateur de remplacement de passeport : programmes de citoyenneté par investissement, voies de résidence, et carte de mobilité interactive." />
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#16171B" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Passeports" />
+<link rel="apple-touch-icon" href="icons/icon-180.png" />
+<link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png" />
+<link rel="icon" type="image/png" sizes="16x16" href="icons/icon-16.png" />
+
+<!-- Librairies (React + Babel standalone pour transformer le JSX dans le navigateur, D3 pour la carte) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js" crossorigin></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js" crossorigin></script>
+
+<style>
+  html, body { margin: 0; padding: 0; }
+  #boot-loader {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: #F7F7F5; color: #6B6B72; font: 500 13px/1.4 -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+    flex-direction: column; gap: 10px;
+  }
+  #boot-loader .dot { width: 8px; height: 8px; border-radius: 50%; background: #0F6E5C; animation: pulse 1.1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:.25;transform:scale(.8)} 50%{opacity:1;transform:scale(1)} }
+</style>
+</head>
+<body>
+<div id="root">
+  <div id="boot-loader"><div class="dot"></div>Chargement…</div>
+</div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useMemo, useEffect, useRef } = React;
+
+/* =========================================================================
+   LOGIQUE DE L'OUTIL
+   Le but n'est PAS d'additionner des pays à un passeport que l'on garde,
+   mais de vérifier ce qui arrive si l'on ABANDONNE le passeport d'origine :
+   quels pays deviennent inaccessibles ("pays perdus"), et quel(s)
+   passeport(s) obtenus par investissement/donation permettent de
+   reconstituer au mieux l'accès perdu — seuls, sans le passeport d'origine.
+
+   DONNÉES — vérifiées par recherche web (juillet 2026) puis simplifiées :
+   échantillon de 172 destinations, blocs de mobilité "durs" (Schengen,
+   Royaume-Uni, Amérique du Nord, Asie-Pacifique avancée) modélisés
+   précisément ; le "reste du monde" (Afrique, Amérique latine, Asie hors
+   pôles avancés…) est modélisé par une estimation de couverture par
+   passeport — à vérifier auprès d'un conseiller agréé avant toute décision.
+   ========================================================================= */
+
+const REGION_LIST = ["Europe", "Moyen-Orient", "Asie", "Afrique", "Amériques", "Océanie"];
+
+const EUROPE = ["Albanie","Allemagne","Andorre","Autriche","Belgique","Bosnie-Herzégovine","Bulgarie","Chypre","Croatie","Danemark","Espagne","Estonie","Finlande","France","Grèce","Hongrie","Irlande","Islande","Italie","Kosovo","Lettonie","Liechtenstein","Lituanie","Luxembourg","Macédoine du Nord","Malte","Moldavie","Monaco","Monténégro","Norvège","Pays-Bas","Pologne","Portugal","République Tchèque","Roumanie","Royaume-Uni","Russie","Saint-Marin","Serbie","Slovaquie","Slovénie","Suède","Suisse","Turquie","Ukraine"];
+const MOYEN_ORIENT = ["Arabie Saoudite","Bahreïn","Émirats Arabes Unis","Égypte","Iran","Irak","Israël","Jordanie","Koweït","Liban","Oman","Qatar","Syrie","Yémen"];
+const ASIE = ["Afghanistan","Arménie","Azerbaïdjan","Bangladesh","Bhoutan","Brunei","Cambodge","Chine","Corée du Nord","Corée du Sud","Géorgie","Hong Kong","Inde","Indonésie","Japon","Kazakhstan","Kirghizistan","Laos","Macao","Malaisie","Maldives","Mongolie","Myanmar","Népal","Ouzbékistan","Pakistan","Philippines","Singapour","Sri Lanka","Taïwan","Tadjikistan","Thaïlande","Timor oriental","Turkménistan","Vietnam"];
+const AFRIQUE = ["Afrique du Sud","Algérie","Angola","Bénin","Botswana","Burkina Faso","Cameroun","Cap-Vert","Comores","Congo (Brazzaville)","Côte d'Ivoire","Djibouti","Érythrée","Éthiopie","Gabon","Gambie","Ghana","Guinée équatoriale","Kenya","Libye","Madagascar","Malawi","Mali","Maroc","Maurice","Mauritanie","Mozambique","Namibie","Niger","Nigeria","Ouganda","Rwanda","Sénégal","São Tomé-et-Príncipe","Seychelles","Sierra Leone","Somalie","Soudan","Tanzanie","Tchad","Togo","Tunisie","Zambie","Zimbabwe"];
+const AMERIQUES = ["États-Unis","Canada","Mexique","Guatemala","Costa Rica","Panama","Cuba","République Dominicaine","Haïti","Jamaïque","Bahamas","Trinité-et-Tobago","Brésil","Argentine","Chili","Colombie","Pérou","Équateur","Bolivie","Venezuela","Paraguay","Uruguay","Saint-Kitts-et-Nevis","Dominique","Antigua-et-Barbuda","Grenade","Sainte-Lucie"];
+const OCEANIE = ["Australie","Nouvelle-Zélande","Fidji","Papouasie-Nouvelle-Guinée","Vanuatu","Samoa","Tonga","Nauru","Palaos"];
+
+const DESTINATIONS = [
+  ...EUROPE.map((name) => ({ name, region: "Europe" })),
+  ...MOYEN_ORIENT.map((name) => ({ name, region: "Moyen-Orient" })),
+  ...ASIE.map((name) => ({ name, region: "Asie" })),
+  ...AFRIQUE.map((name) => ({ name, region: "Afrique" })),
+  ...AMERIQUES.map((name) => ({ name, region: "Amériques" })),
+  ...OCEANIE.map((name) => ({ name, region: "Océanie" })),
+];
+const ALL_NAMES = DESTINATIONS.map((d) => d.name);
+
+// Coordonnées approximatives (lon, lat) pour la carte — précision "capitale/centroïde".
+const COORDS = {
+  "Albanie":[19.8,41.3],"Allemagne":[10.4,51.2],"Andorre":[1.5,42.5],"Autriche":[14.5,47.5],"Belgique":[4.5,50.6],
+  "Bosnie-Herzégovine":[17.8,44.2],"Bulgarie":[25.5,42.7],"Chypre":[33.4,35.1],"Croatie":[15.9,45.4],"Danemark":[10.0,56.0],
+  "Espagne":[-3.7,40.4],"Estonie":[25.0,58.6],"Finlande":[26.0,64.0],"France":[2.3,46.6],"Grèce":[22.9,39.0],
+  "Hongrie":[19.5,47.2],"Irlande":[-8.0,53.3],"Islande":[-19.0,64.9],"Italie":[12.6,42.8],"Kosovo":[21.0,42.6],
+  "Lettonie":[24.6,56.9],"Liechtenstein":[9.5,47.2],"Lituanie":[23.9,55.2],"Luxembourg":[6.1,49.8],"Macédoine du Nord":[21.7,41.6],
+  "Malte":[14.4,35.9],"Moldavie":[28.4,47.4],"Monaco":[7.4,43.7],"Monténégro":[19.3,42.7],"Norvège":[8.5,60.5],
+  "Pays-Bas":[5.3,52.2],"Pologne":[19.4,52.1],"Portugal":[-8.2,39.4],"République Tchèque":[15.5,49.8],"Roumanie":[24.9,45.9],
+  "Royaume-Uni":[-2.0,54.0],"Russie":[37.6,55.75],"Saint-Marin":[12.45,43.94],"Serbie":[20.9,44.0],"Slovaquie":[19.7,48.7],
+  "Slovénie":[14.8,46.1],"Suède":[15.0,62.0],"Suisse":[8.2,46.8],"Turquie":[35.0,39.0],"Ukraine":[31.0,49.0],
+  "Arabie Saoudite":[45.0,24.0],"Bahreïn":[50.5,26.0],"Émirats Arabes Unis":[54.3,24.0],"Égypte":[30.8,26.8],"Iran":[53.7,32.4],
+  "Irak":[43.7,33.2],"Israël":[34.8,31.5],"Jordanie":[36.2,31.2],"Koweït":[47.5,29.3],"Liban":[35.9,33.9],
+  "Oman":[56.0,21.0],"Qatar":[51.2,25.3],"Syrie":[38.0,35.0],"Yémen":[44.0,15.5],
+  "Afghanistan":[66.0,34.0],"Arménie":[45.0,40.1],"Azerbaïdjan":[47.6,40.4],"Bangladesh":[90.4,23.7],"Bhoutan":[90.4,27.5],
+  "Brunei":[114.7,4.9],"Cambodge":[104.9,12.6],"Chine":[104.2,35.9],"Corée du Nord":[127.5,40.0],"Corée du Sud":[127.8,36.5],
+  "Géorgie":[43.4,42.3],"Hong Kong":[114.2,22.3],"Inde":[78.9,22.6],"Indonésie":[113.9,-0.8],"Japon":[138.3,36.2],
+  "Kazakhstan":[66.9,48.0],"Kirghizistan":[74.6,41.2],"Laos":[102.6,18.2],"Macao":[113.5,22.2],"Malaisie":[101.9,4.2],
+  "Maldives":[73.5,3.2],"Mongolie":[103.8,46.9],"Myanmar":[96.1,21.9],"Népal":[84.1,28.4],"Ouzbékistan":[64.6,41.4],
+  "Pakistan":[69.3,30.4],"Philippines":[121.8,12.9],"Singapour":[103.8,1.35],"Sri Lanka":[80.8,7.9],"Taïwan":[121.0,23.7],
+  "Tadjikistan":[71.3,38.9],"Thaïlande":[101.0,15.9],"Timor oriental":[125.7,-8.6],"Turkménistan":[59.6,38.9],"Vietnam":[106.0,16.0],
+  "Afrique du Sud":[24.0,-29.0],"Algérie":[3.0,28.0],"Angola":[17.9,-12.3],"Bénin":[2.3,9.3],"Botswana":[24.7,-22.3],
+  "Burkina Faso":[-1.5,12.4],"Cameroun":[12.4,7.4],"Cap-Vert":[-24.0,15.1],"Comores":[43.9,-11.9],"Congo (Brazzaville)":[15.8,-0.7],
+  "Côte d'Ivoire":[-5.5,7.5],"Djibouti":[42.6,11.8],"Érythrée":[39.8,15.2],"Éthiopie":[40.0,9.1],"Gabon":[11.6,-0.6],
+  "Gambie":[-15.3,13.4],"Ghana":[-1.0,7.9],"Guinée équatoriale":[10.3,1.6],"Kenya":[37.9,0.0],"Libye":[17.2,26.3],
+  "Madagascar":[46.9,-18.9],"Malawi":[34.3,-13.3],"Mali":[-3.9,17.6],"Maroc":[-6.8,32.0],"Maurice":[57.5,-20.3],
+  "Mauritanie":[-10.9,20.3],"Mozambique":[35.5,-18.7],"Namibie":[17.1,-22.6],"Niger":[8.1,17.6],"Nigeria":[8.7,9.1],
+  "Ouganda":[32.3,1.4],"Rwanda":[29.9,-1.9],"Sénégal":[-14.5,14.5],"São Tomé-et-Príncipe":[6.6,0.2],"Seychelles":[55.5,-4.7],"Sierra Leone":[-11.8,8.5],
+  "Somalie":[46.2,5.2],"Soudan":[30.2,15.6],"Tanzanie":[34.9,-6.4],"Tchad":[18.7,15.5],"Togo":[0.8,8.6],
+  "Tunisie":[9.5,34.0],"Zambie":[27.8,-13.1],"Zimbabwe":[29.2,-19.0],
+  "États-Unis":[-98.5,39.8],"Canada":[-106.3,56.1],"Mexique":[-102.5,23.6],"Guatemala":[-90.2,15.8],"Costa Rica":[-84.0,9.7],
+  "Panama":[-80.0,8.5],"Cuba":[-77.8,21.5],"République Dominicaine":[-70.2,18.7],"Haïti":[-72.3,18.9],"Jamaïque":[-77.3,18.1],
+  "Bahamas":[-77.4,24.3],"Trinité-et-Tobago":[-61.2,10.7],"Brésil":[-51.9,-14.2],"Argentine":[-63.6,-38.4],"Chili":[-71.5,-35.7],
+  "Colombie":[-74.3,4.6],"Pérou":[-75.0,-9.2],"Équateur":[-78.2,-1.8],"Bolivie":[-63.6,-16.3],"Venezuela":[-66.9,6.4],
+  "Paraguay":[-58.4,-23.4],"Uruguay":[-55.8,-32.5],"Saint-Kitts-et-Nevis":[-62.75,17.35],"Dominique":[-61.4,15.4],
+  "Antigua-et-Barbuda":[-61.8,17.1],"Grenade":[-61.7,12.1],"Sainte-Lucie":[-61.0,13.9],
+  "Australie":[133.8,-25.3],"Nouvelle-Zélande":[174.9,-40.9],"Fidji":[178.0,-17.7],"Papouasie-Nouvelle-Guinée":[143.9,-6.3],
+  "Vanuatu":[166.9,-15.4],"Samoa":[-172.1,-13.8],"Tonga":[-175.2,-21.2],"Nauru":[166.9,-0.5],"Palaos":[134.6,7.5],
+};
+
+// Codes numériques ISO 3166-1, utilisés pour faire correspondre nos noms de
+// pays aux frontières réelles d'un fond de carte du monde (voir WORLD_TOPO_URL).
+// Les micro-états (Caraïbes, Pacifique...) sont souvent absents des fonds de
+// carte simplifiés : ils s'affichent alors comme un marqueur ponctuel plutôt
+// qu'une région coloriée — géré automatiquement, sans casser l'affichage.
+const ISO_NUM = {
+  "Albanie":8,"Allemagne":276,"Andorre":20,"Autriche":40,"Belgique":56,"Bosnie-Herzégovine":70,"Bulgarie":100,
+  "Chypre":196,"Croatie":191,"Danemark":208,"Espagne":724,"Estonie":233,"Finlande":246,"France":250,"Grèce":300,
+  "Hongrie":348,"Irlande":372,"Islande":352,"Italie":380,"Lettonie":428,"Liechtenstein":438,"Lituanie":440,
+  "Luxembourg":442,"Macédoine du Nord":807,"Malte":470,"Moldavie":498,"Monaco":492,"Monténégro":499,"Norvège":578,
+  "Pays-Bas":528,"Pologne":616,"Portugal":620,"République Tchèque":203,"Roumanie":642,"Royaume-Uni":826,"Russie":643,
+  "Saint-Marin":674,"Serbie":688,"Slovaquie":703,"Slovénie":705,"Suède":752,"Suisse":756,"Turquie":792,"Ukraine":804,
+  "Arabie Saoudite":682,"Bahreïn":48,"Émirats Arabes Unis":784,"Égypte":818,"Iran":364,"Irak":368,"Israël":376,
+  "Jordanie":400,"Koweït":414,"Liban":422,"Oman":512,"Qatar":634,"Syrie":760,"Yémen":887,
+  "Afghanistan":4,"Arménie":51,"Azerbaïdjan":31,"Bangladesh":50,"Bhoutan":64,"Brunei":96,"Cambodge":116,"Chine":156,
+  "Corée du Nord":408,"Corée du Sud":410,"Géorgie":268,"Hong Kong":344,"Inde":356,"Indonésie":360,"Japon":392,
+  "Kazakhstan":398,"Kirghizistan":417,"Laos":418,"Macao":446,"Malaisie":458,"Maldives":462,"Mongolie":496,
+  "Myanmar":104,"Népal":524,"Ouzbékistan":860,"Pakistan":586,"Philippines":608,"Singapour":702,"Sri Lanka":144,
+  "Taïwan":158,"Tadjikistan":762,"Thaïlande":764,"Timor oriental":626,"Turkménistan":795,"Vietnam":704,
+  "Afrique du Sud":710,"Algérie":12,"Angola":24,"Bénin":204,"Botswana":72,"Burkina Faso":854,"Cameroun":120,
+  "Cap-Vert":132,"Comores":174,"Congo (Brazzaville)":178,"Côte d'Ivoire":384,"Djibouti":262,"Érythrée":232,
+  "Éthiopie":231,"Gabon":266,"Gambie":270,"Ghana":288,"Guinée équatoriale":226,"Kenya":404,"Libye":434,
+  "Madagascar":450,"Malawi":454,"Mali":466,"Maroc":504,"Maurice":480,"Mauritanie":478,"Mozambique":508,
+  "Namibie":516,"Niger":562,"Nigeria":566,"Ouganda":800,"Rwanda":646,"Sénégal":686,"São Tomé-et-Príncipe":678,"Seychelles":690,
+  "Sierra Leone":694,"Somalie":706,"Soudan":729,"Tanzanie":834,"Tchad":148,"Togo":768,"Tunisie":788,"Zambie":894,"Zimbabwe":716,
+  "États-Unis":840,"Canada":124,"Mexique":484,"Guatemala":320,"Costa Rica":188,"Panama":591,"Cuba":192,
+  "République Dominicaine":214,"Haïti":332,"Jamaïque":388,"Bahamas":44,"Trinité-et-Tobago":780,"Brésil":76,
+  "Argentine":32,"Chili":152,"Colombie":170,"Pérou":604,"Équateur":218,"Bolivie":68,"Venezuela":862,"Paraguay":600,
+  "Uruguay":858,"Saint-Kitts-et-Nevis":659,"Dominique":212,"Antigua-et-Barbuda":28,"Grenade":308,"Sainte-Lucie":662,
+  "Australie":36,"Nouvelle-Zélande":554,"Fidji":242,"Papouasie-Nouvelle-Guinée":598,"Vanuatu":548,"Samoa":882,
+  "Tonga":776,"Nauru":520,"Palaos":585,
+};
+
+const WORLD_TOPO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
+
+// Décodeur TopoJSON minimal (arcs delta-encodés -> anneaux GeoJSON).
+function decodeTopoJSON(topology) {
+  const transform = topology.transform;
+  const scale = transform ? transform.scale : [1, 1];
+  const translate = transform ? transform.translate : [0, 0];
+  const arcs = topology.arcs.map((rawArc) => {
+    let x = 0, y = 0;
+    return rawArc.map(([dx, dy]) => { x += dx; y += dy; return [x * scale[0] + translate[0], y * scale[1] + translate[1]]; });
+  });
+  function getArc(i) { return i < 0 ? arcs[~i].slice().reverse() : arcs[i]; }
+  function line(idxArr) {
+    let coords = [];
+    idxArr.forEach((i, k) => { const a = getArc(i); coords = coords.concat(k > 0 ? a.slice(1) : a); });
+    return coords;
+  }
+  function polygon(rings) { return rings.map(line); }
+  const key = Object.keys(topology.objects)[0];
+  const obj = topology.objects[key];
+  return obj.geometries.map((g) => {
+    let coordinates = null;
+    if (g.type === "Polygon") coordinates = polygon(g.arcs);
+    else if (g.type === "MultiPolygon") coordinates = g.arcs.map(polygon);
+    return { type: "Feature", id: g.id, properties: g.properties || {}, geometry: coordinates ? { type: g.type, coordinates } : null };
+  }).filter((f) => f.geometry);
+}
+
+
+const SCHENGEN = ["Allemagne","Autriche","Belgique","Danemark","Espagne","Estonie","Finlande","France","Grèce","Hongrie","Islande","Italie","Lettonie","Liechtenstein","Lituanie","Luxembourg","Malte","Norvège","Pays-Bas","Pologne","Portugal","République Tchèque","Slovaquie","Slovénie","Suède","Suisse"];
+const UK_BLOC = ["Royaume-Uni"];
+const NORTHAM = ["États-Unis","Canada"];
+const ADV_APAC = ["Japon","Corée du Sud","Singapour","Hong Kong","Macao","Australie","Nouvelle-Zélande"];
+const HARD_BLOCS = new Set([...SCHENGEN, ...UK_BLOC, ...NORTHAM, ...ADV_APAC]);
+
+// Le reste (~136 destinations) : pays "faciles" et pays nécessitant un
+// visa à l'arrivée / e-visa même pour un passeport puissant.
+const GAP_EU = ["Chine","Russie","Corée du Nord","Turkménistan","Afghanistan","Pakistan","Syrie","Libye","Yémen","Soudan","Somalie","Érythrée","Guinée équatoriale","Congo (Brazzaville)","Tchad","Bhoutan","Cameroun","Mali"];
+const VOA_EU = ["Cambodge","Laos","Myanmar","Népal","Maldives","Bahreïn","Jordanie","Égypte","Éthiopie","Kenya","Ouganda","Rwanda","Tanzanie","Madagascar","Comores","Mozambique","Zambie","Bangladesh","Inde","Timor oriental","Indonésie","Arabie Saoudite","Iran","Djibouti","Cap-Vert","Malawi","Zimbabwe","Gambie","Nigeria","Angola"];
+
+function hash(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0; return h; }
+function pseudoRand(a, b) { return (hash(a + "::" + b) % 1000) / 1000; }
+
+function buildOrigin(gap, voa) {
+  const gapSet = new Set(gap), voaSet = new Set(voa);
+  const visaFree = ALL_NAMES.filter((n) => !gapSet.has(n) && !voaSet.has(n));
+  return { visaFree, voa };
+}
+
+// Pour les passeports plus modestes, on construit l'accès à partir des mêmes
+// blocs que les programmes CBI (Schengen / UK / Amérique du Nord / Asie-Pacifique
+// avancée + une fraction du reste du monde) plutôt que d'énumérer un écart
+// géant à la main — même logique, même niveau d'approximation assumé.
+function buildOriginFromBlocs(seedId, { schengen = false, uk = false, northam = false, advApac = [], restFrac = 0 }) {
+  const restPool = ALL_NAMES.filter((n) => !HARD_BLOCS.has(n));
+  const set = new Set();
+  if (schengen) SCHENGEN.forEach((c) => set.add(c));
+  if (uk) UK_BLOC.forEach((c) => set.add(c));
+  if (northam) NORTHAM.forEach((c) => set.add(c));
+  advApac.forEach((c) => set.add(c));
+  restPool.forEach((c) => { if (pseudoRand(seedId, c) < restFrac) set.add(c); });
+  return { visaFree: [...set], voa: [] };
+}
+
+const ORIGIN_PASSPORTS = {
+  France: { flag: "🇫🇷", rank: "4ᵉ ex æquo — 185-186 destinations réelles (Henley 2026)", ...buildOrigin(GAP_EU, VOA_EU) },
+  Belgique: { flag: "🇧🇪", rank: "4ᵉ ex æquo — 185-186 destinations réelles (Henley 2026)", ...buildOrigin(GAP_EU, VOA_EU) },
+  Italie: { flag: "🇮🇹", rank: "4ᵉ ex æquo — 185-186 destinations réelles (Henley 2026)", ...buildOrigin(GAP_EU, VOA_EU) },
+  Allemagne: { flag: "🇩🇪", rank: "4ᵉ ex æquo — 185-186 destinations réelles (Henley 2026)", ...buildOrigin(GAP_EU, VOA_EU) },
+  Espagne: { flag: "🇪🇸", rank: "3ᵉ ex æquo — 186 destinations réelles (Henley 2026)", ...buildOrigin(GAP_EU, VOA_EU) },
+  Suisse: { flag: "🇨🇭", rank: "3ᵉ ex æquo — 186 destinations réelles (Henley 2026)", ...buildOrigin(GAP_EU, VOA_EU) },
+  "Royaume-Uni": { flag: "🇬🇧", rank: "≈6ᵉ — 184 destinations réelles (Henley 2026)", ...buildOrigin(GAP_EU, VOA_EU) },
+  "États-Unis": { flag: "🇺🇸", rank: "10ᵉ — 179 destinations réelles (Henley 2026)", ...buildOrigin(GAP_EU, VOA_EU) },
+  "Émirats Arabes Unis": { flag: "🇦🇪", rank: "5ᵉ — 184 destinations réelles, avec accès Chine + Russie", ...buildOrigin(GAP_EU.filter((c) => c !== "Chine" && c !== "Russie"), VOA_EU) },
+  Brésil: { flag: "🇧🇷", rank: "≈17ᵉ-47ᵉ selon les éditions — 169 destinations réelles (Henley 2026)", ...buildOriginFromBlocs("Brésil", { schengen: true, uk: true, northam: false, advApac: ["Japon", "Corée du Sud", "Singapour", "Hong Kong", "Macao"], restFrac: 0.71 }) },
+  Maroc: { flag: "🇲🇦", rank: "62ᵉ ex æquo — 71-72 destinations réelles (Henley 2026)", ...buildOriginFromBlocs("Maroc", { schengen: false, uk: false, northam: false, advApac: [], restFrac: 0.53 }) },
+  Indonésie: { flag: "🇮🇩", rank: "62ᵉ ex æquo — ≈72 destinations réelles (Henley 2026)", ...buildOriginFromBlocs("Indonésie", { schengen: false, uk: false, northam: false, advApac: ["Singapour"], restFrac: 0.52 }) },
+  Algérie: { flag: "🇩🇿", rank: "77ᵉ — 55 destinations réelles (Henley 2026)", ...buildOriginFromBlocs("Algérie", { schengen: false, uk: false, northam: false, advApac: [], restFrac: 0.31 }) },
+};
+
+const fmt = (n) => new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(n) + " $";
+
+/* ------------------------------- Programmes ------------------------------- */
+
+const CBI_PROGRAMS = [
+  { id: "stkitts", country: "Saint-Kitts-et-Nevis", flag: "🇰🇳", cost: 250000, costLabel: "250 000 $", timeline: "4 à 6 mois",
+    schengen: true, uk: true, northam: false, advApac: ["Singapour", "Hong Kong", "Macao"], restFrac: 0.95, bonusGain: ["Russie"],
+    requirements: ["Don au Sustainable Island State Contribution (SISC) : 250 000 $ pour un candidat seul.","Alternative : investissement immobilier agréé (revente possible après 7 ans).","Famille : conjoint et enfants à charge inclus moyennant des frais supplémentaires.","Aucune obligation de résidence ni de séjour physique."],
+    note: "Un des programmes CBI les plus anciens et les mieux établis (depuis 1984)." },
+  { id: "dominique", country: "Dominique", flag: "🇩🇲", cost: 200000, costLabel: "200 000 $", timeline: "4 à 6 mois",
+    schengen: true, uk: false, northam: false, advApac: ["Singapour", "Hong Kong", "Macao"], restFrac: 0.88, bonusGain: ["Russie", "Chine"],
+    requirements: ["Don à l'Economic Diversification Fund (EDF) : 200 000 $ pour un candidat seul.","Alternative : immobilier agréé à partir de 200 000 $.","Depuis un changement récent, un visa britannique classique est redevenu nécessaire (perte de l'accès sans visa au Royaume-Uni).","Depuis 2025-2026, le visa touriste américain (B1/B2) est limité à une entrée unique de 3 mois."],
+    note: "Accès sans visa à la Chine confirmé — rare parmi les passeports CBI." },
+  { id: "antigua", country: "Antigua-et-Barbuda", flag: "🇦🇬", cost: 230000, costLabel: "230 000 $", timeline: "4 à 6 mois",
+    schengen: true, uk: true, northam: false, advApac: ["Singapour", "Hong Kong", "Macao"], restFrac: 0.94, bonusGain: ["Russie", "Chine"],
+    requirements: ["Don au National Development Fund (NDF) : 230 000 $ pour une famille jusqu'à 4 personnes.","Alternative : immobilier agréé dès 230 000 $, ou investissement en entreprise.","5 jours de séjour physique dans le pays requis sur 5 ans.","Royaume-Uni accessible via ETA (autorisation électronique)."],
+    note: "" },
+  { id: "grenade", country: "Grenade", flag: "🇬🇩", cost: 235000, costLabel: "235 000 $", timeline: "6 à 8 mois",
+    schengen: true, uk: true, northam: false, advApac: ["Singapour", "Hong Kong", "Macao"], restFrac: 0.85, bonusGain: ["Russie", "Chine"],
+    requirements: ["Don au National Transformation Fund (NTF) : 235 000 $ pour un candidat seul.","Alternative : immobilier agréé dès 270 000 $ (partagé) ou 350 000 $ (exclusif).","Seul passeport CBI ouvrant l'éligibilité au visa américain E-2 investisseur (utile pour vivre aux USA malgré l'absence d'accès sans visa)."],
+    note: "Le plus intéressant pour un projet d'implantation aux États-Unis via le visa E-2." },
+  { id: "stlucie", country: "Sainte-Lucie", flag: "🇱🇨", cost: 240000, costLabel: "240 000 $", timeline: "4 à 6 mois",
+    schengen: true, uk: false, northam: false, advApac: ["Singapour", "Hong Kong"], restFrac: 0.80, bonusGain: ["Russie"],
+    requirements: ["Don au National Economic Fund : 240 000 $ pour un candidat seul.","Alternative : immobilier agréé ou obligations d'État à taux zéro (300 000 $, remboursables après 5 ans).","Un visa britannique classique est désormais requis (accès sans visa au Royaume-Uni perdu récemment)."],
+    note: "" },
+  { id: "vanuatu", country: "Vanuatu", flag: "🇻🇺", cost: 130000, costLabel: "dès 130 000 $", timeline: "1 à 2 mois (le plus rapide)",
+    schengen: false, uk: false, northam: false, advApac: ["Hong Kong"], restFrac: 0.55, bonusGain: ["Russie"],
+    requirements: ["Don unique dès 130 000 $ pour un candidat seul.","⚠️ L'UE a suspendu l'exemption de visa Schengen en 2022 puis l'a retirée définitivement en décembre 2024 ; le Royaume-Uni a fait de même en 2023.","Le passeport ne donne donc plus accès sans visa à l'espace Schengen ni au Royaume-Uni en 2026."],
+    note: "Le plus rapide, mais sa valeur de remplacement s'est effondrée depuis 2022-2024." },
+  { id: "nauru", country: "Nauru", flag: "🇳🇷", cost: 90000, costLabel: "dès 90 000 $ (jusqu'au 30/06/2026, puis 115 000 $)", timeline: "≈3 mois",
+    schengen: false, uk: false, northam: false, advApac: [], restFrac: 0.30, bonusGain: [],
+    requirements: ["Don non remboursable dès 90 000 $ pour un candidat seul.","Programme lancé en 2024 : peu d'antécédents, à considérer avec prudence.","Autorise les couples non mariés à candidater conjointement (particularité unique)."],
+    note: "Bon marché mais ne remplace presque rien d'un passeport occidental fort." },
+  { id: "saotome", country: "São Tomé-et-Príncipe", flag: "🇸🇹", cost: 90000, costLabel: "dès 90 000-95 000 $", timeline: "≈2 à 5 mois",
+    schengen: false, uk: false, northam: false, advApac: [], restFrac: 0.35, bonusGain: [],
+    requirements: ["Don non remboursable dès 90 000 $ pour un candidat seul.","Programme récent (2023-2024), peu de recul disponible.","Parmi les moins chers du marché mondial."],
+    note: "" },
+  { id: "macedoine", country: "Macédoine du Nord", flag: "🇲🇰", cost: 200000, costLabel: "200 000 €", timeline: "≈8 à 12 mois",
+    schengen: true, uk: false, northam: false, advApac: ["Singapour", "Hong Kong"], restFrac: 0.65, bonusGain: ["Russie"],
+    requirements: ["Investissement de 200 000 € dans une entreprise locale créant des emplois, sous statut d'investisseur spécial.","Accès Schengen confirmé (accord de libéralisation des visas depuis 2009), mais pays hors UE."],
+    note: "Candidat officiel à l'adhésion UE — potentiel de valorisation à long terme." },
+  { id: "turquie", country: "Turquie", flag: "🇹🇷", cost: 400000, costLabel: "400 000 $ (immobilier, détention 3 ans min.)", timeline: "≈6 à 8 mois",
+    schengen: false, uk: false, northam: false, advApac: ["Japon", "Corée du Sud", "Singapour", "Hong Kong", "Macao"], restFrac: 0.70, bonusGain: [],
+    requirements: ["Achat immobilier agréé d'au moins 400 000 $, conservé 3 ans minimum.","Alternative : dépôt bancaire ou investissement en entreprise de même montant.","Aucun accès sans visa à l'espace Schengen, au Royaume-Uni, aux États-Unis ni au Canada."],
+    note: "Bonne mobilité en Asie et Amérique latine, mais perd tout l'Occident (UE, UK, USA, Canada)." },
+  { id: "egypte", country: "Égypte", flag: "🇪🇬", cost: 250000, costLabel: "≈250 000 $", timeline: "≈6 à 12 mois",
+    schengen: false, uk: false, northam: false, advApac: ["Singapour"], restFrac: 0.35, bonusGain: [],
+    requirements: ["Don au gouvernement ou investissement immobilier agréé, selon la filière.","Utile pour une implantation régionale (Afrique du Nord, Moyen-Orient), pas pour remplacer un passeport occidental."],
+    note: "" },
+  { id: "jordanie", country: "Jordanie", flag: "🇯🇴", cost: 1000000, costLabel: "≈1 000 000 $ (filières à seuils élevés)", timeline: "≈6 à 12 mois",
+    schengen: false, uk: false, northam: false, advApac: [], restFrac: 0.25, bonusGain: [],
+    requirements: ["Dépôt bancaire sans intérêt de plusieurs années, ou investissement en entreprise/immobilier à seuils élevés.","Passeport parmi les plus faibles en mobilité mondiale (≈49 destinations réelles)."],
+    note: "Coût très élevé pour un remplacement quasi nul." },
+  { id: "malte", country: "Malte", flag: "🇲🇹", cost: 750000, costLabel: "dès 750 000 € (don + immobilier + frais)", timeline: "1 à 3 ans de résidence préalable",
+    schengen: true, uk: true, northam: true, advApac: ["Japon", "Corée du Sud", "Singapour", "Hong Kong", "Macao", "Australie", "Nouvelle-Zélande"], restFrac: 1.0, bonusGain: [],
+    requirements: ["Contribution au fonds national + immobilier agréé + frais administratifs, total ≥ 750 000 €.","1 an de résidence préalable (filière majorée) ou 3 ans (filière standard).","Citoyenneté de l'Union européenne : libre circulation complète dans l'UE/Schengen."],
+    note: "Le seul passeport de cette liste capable de reproduire quasi intégralement un passeport français/belge/italien — logique, puisque c'est lui aussi un passeport de l'UE." },
+  { id: "cambodge", country: "Cambodge", flag: "🇰🇭", cost: 245000, costLabel: "245 000 $ (don) ou 305 000 $ (investissement)", timeline: "≈3 à 6 mois",
+    schengen: false, uk: false, northam: false, advApac: ["Singapour"], restFrac: 0.30, bonusGain: [],
+    requirements: ["Don de 245 000 $ au gouvernement royal, ou investissement de 305 000 $ dans un projet agréé.","Naturalisation par décret royal (loi de 1996 sur la nationalité).","Intérêt régional (ASEAN) plutôt que mondial."],
+    note: "" },
+  { id: "panama", country: "Panama", flag: "🇵🇦", cost: 300000, costLabel: "dès 300 000 $ (résidence immédiate)", timeline: "Résidence en 30-45 jours ; citoyenneté après 5 ans", slow: true,
+    schengen: true, uk: true, northam: false, advApac: ["Singapour"], restFrac: 0.78, bonusGain: [],
+    requirements: ["⚠️ Ce n'est pas une citoyenneté immédiate : l'investissement (immobilier, dépôt, bourse, dès 300 000 $) donne la résidence permanente.","La naturalisation n'est possible qu'après 5 ans de résidence effective, avec examen d'espagnol.","Système fiscal territorial : aucun impôt sur les revenus de source étrangère."],
+    note: "Voie lente (5 ans+) mais l'un des meilleurs profils de remplacement une fois obtenu. Également listé dans « nationalités non commercialisables » ci-dessous, car la citoyenneté elle-même ne s'achète pas directement." },
+];
+
+const UPCOMING_PROGRAMS = [
+  { country: "Botswana", flag: "🇧🇼" },
+  { country: "Argentine", flag: "🇦🇷" },
+  { country: "Saint-Vincent-et-les-Grenadines", flag: "🇻🇨" },
+];
+
+// Nationalités non commercialisables : accessibles uniquement après une
+// résidence effective prolongée et une naturalisation discrétionnaire.
+// Structurées comme les programmes CBI ci-dessus pour pouvoir être
+// sélectionnées et apparaître sur la carte au même titre.
+const RESIDENCY_PROGRAMS = [
+  { id: "bresil-res", country: "Brésil", flag: "🇧🇷", cost: 0, costLabel: "Aucun investissement requis", timeline: "4 ans de résidence (1 an si conjoint brésilien ou enfant né au Brésil)",
+    schengen: true, uk: true, northam: false, advApac: ["Japon", "Corée du Sud", "Singapour", "Hong Kong", "Macao"], restFrac: 0.71, bonusGain: [],
+    requirements: ["Résidence continue et effective sur le territoire brésilien.", "Procédure administrative (Ministère de la Justice), double nationalité tolérée.", "Aucun seuil d'investissement — la résidence peut aussi s'obtenir par le travail, l'entreprise ou le regroupement familial."],
+    note: "≈169 destinations une fois la nationalité obtenue.", residency: true },
+  { id: "thailande-res", country: "Thaïlande", flag: "🇹🇭", cost: 0, costLabel: "Aucun investissement obligatoire (visas Elite/LTR facultatifs)", timeline: "5 ans de résidence permanente (elle-même longue à obtenir)",
+    schengen: false, uk: false, northam: false, advApac: ["Singapour"], restFrac: 0.53, bonusGain: [],
+    requirements: ["Résidence permanente préalable, elle-même soumise à des années de visas successifs.", "Examen de langue thaïe, procédure très discrétionnaire.", "Double nationalité non officiellement reconnue mais tolérée en pratique."],
+    note: "≈84 destinations une fois la nationalité obtenue.", residency: true },
+  { id: "indonesie-res", country: "Indonésie", flag: "🇮🇩", cost: 0, costLabel: "Aucun investissement requis", timeline: "5 à 10 ans de résidence continue",
+    schengen: false, uk: false, northam: false, advApac: ["Singapour"], restFrac: 0.52, bonusGain: [],
+    requirements: ["Résidence continue, examen de langue et de culture.", "L'Indonésie n'autorise pas la double nationalité : renonciation à la nationalité d'origine généralement exigée."],
+    note: "≈72 destinations une fois la nationalité obtenue.", residency: true },
+  { id: "maroc-res", country: "Maroc", flag: "🇲🇦", cost: 0, costLabel: "Aucun investissement requis", timeline: "≈5 ans de résidence continue",
+    schengen: false, uk: false, northam: false, advApac: [], restFrac: 0.53, bonusGain: [],
+    requirements: ["Résidence continue, procédure discrétionnaire du ministère de la Justice.", "Double nationalité généralement tolérée en pratique."],
+    note: "≈71-72 destinations une fois la nationalité obtenue.", residency: true },
+  { id: "maurice-res", country: "Maurice", flag: "🇲🇺", cost: 375000, costLabel: "dès 375 000 $ (résidence permanente immobilière) ou 1 000 000 $ (Golden Visa 2026, voie accélérée)", timeline: "2 ans (Golden Visa) à plusieurs années (voie standard) avant la naturalisation",
+    schengen: true, uk: true, northam: false, advApac: ["Japon", "Singapour", "Hong Kong"], restFrac: 0.85, bonusGain: ["Russie", "Chine"],
+    requirements: ["Pas de citoyenneté par investissement directe : l'investissement donne la résidence permanente, la naturalisation reste discrétionnaire (article 9(5) du Citizenship Act, sans recours possible).", "Renonciation à toute autre nationalité généralement exigée pour les naturalisés.", "Le Golden Visa 2026 (dès 1 000 000 $) ouvre une naturalisation accélérée après 2 ans de résidence effective."],
+    note: "Un des passeports les plus forts d'Afrique une fois obtenu (≈147-159 destinations), mais la naturalisation reste à la discrétion du gouvernement.", residency: true },
+  { id: "seychelles-res", country: "Seychelles", flag: "🇸🇨", cost: 0, costLabel: "Permis de résidence liés à l'investissement disponibles, mais aucun raccourci officiel vers la nationalité", timeline: "≈11 ans de résidence continue",
+    schengen: true, uk: true, northam: false, advApac: ["Singapour"], restFrac: 0.68, bonusGain: [],
+    requirements: ["Résidence continue et effective sur les Seychelles pendant environ 11 ans.", "Certains sites commerciaux évoquent un programme « citizenship by investment » aux Seychelles : à ce jour, aucune base légale officielle ne confirme une voie d'achat direct — à vérifier au cas par cas avant tout engagement."],
+    note: "≈150 destinations une fois la nationalité obtenue, dont l'espace Schengen.", residency: true },
+  { id: "costarica-res", country: "Costa Rica", flag: "🇨🇷", cost: 150000, costLabel: "dès 150 000 $ (catégorie « Inversionista »)", timeline: "7 ans de résidence (5 ans si conjoint costaricien)",
+    schengen: true, uk: true, northam: false, advApac: ["Singapour"], restFrac: 0.73, bonusGain: [],
+    requirements: ["Investissement immobilier, en entreprise ou en reforestation dès 150 000 $ pour la résidence « Inversionista ».", "La résidence n'est qu'une étape : la naturalisation exige ensuite 7 ans de résidence légale continue (5 ans en cas de mariage avec un ressortissant costaricien).", "Examen d'espagnol et d'instruction civique."],
+    note: "≈148 destinations une fois la nationalité obtenue.", residency: true },
+  { id: "panama-res", country: "Panama", flag: "🇵🇦", cost: 300000, costLabel: "dès 300 000 $ (résidence immédiate)", timeline: "Résidence en 30-45 jours ; citoyenneté après 5 ans",
+    schengen: true, uk: true, northam: false, advApac: ["Singapour"], restFrac: 0.78, bonusGain: [],
+    requirements: ["L'investissement (immobilier, dépôt, bourse, dès 300 000 $) donne la résidence permanente, pas la citoyenneté.", "La naturalisation n'est possible qu'après 5 ans de résidence effective, avec examen d'espagnol.", "Système fiscal territorial : aucun impôt sur les revenus de source étrangère."],
+    note: "Voie lente (5 ans+) mais l'un des meilleurs profils une fois obtenu.", residency: true },
+];
+
+// Cas particulier signalé : la Polynésie française est une collectivité
+// française d'outre-mer. Ses habitants sont des citoyens français à part
+// entière (même passeport, même mobilité) ; il existe un statut civil
+// coutumier local pour certains résidents, mais celui-ci concerne le droit
+// civil et foncier local, pas une nationalité ou une mobilité distincte.
+// Il n'est donc pas modélisable comme un programme séparé dans cet outil.
+const POLYNESIA_NOTE = "La Polynésie française n'ouvre pas de nationalité distincte : ses résidents sont des citoyens français, avec le même passeport et la même mobilité. Un statut civil coutumier local existe pour certains résidents, mais il porte sur le droit civil et foncier, pas sur la nationalité — il n'a donc pas sa place dans ce comparateur.";
+
+const ALL_PROGRAM_LIST = [...CBI_PROGRAMS, ...RESIDENCY_PROGRAMS];
+
+function accessSetFor(program, restOriginList) {
+  const s = new Set();
+  if (program.schengen) SCHENGEN.forEach((c) => s.add(c));
+  if (program.uk) UK_BLOC.forEach((c) => s.add(c));
+  if (program.northam) NORTHAM.forEach((c) => s.add(c));
+  program.advApac.forEach((c) => s.add(c));
+  restOriginList.forEach((c) => { if (pseudoRand(program.id, c) < program.restFrac) s.add(c); });
+  (program.bonusGain || []).forEach((c) => s.add(c));
+  if (program.country) s.add(program.country); // on a toujours accès à son propre pays
+  return s;
+}
+
+function lostBlocsFor(program) {
+  const lost = [];
+  if (!program.schengen) lost.push(`Espace Schengen (${SCHENGEN.length} pays)`);
+  if (!program.uk) lost.push("Royaume-Uni");
+  if (!program.northam) lost.push("États-Unis et Canada");
+  const missingApac = ADV_APAC.filter((c) => !program.advApac.includes(c));
+  if (missingApac.length) lost.push(missingApac.join(", "));
+  return lost;
+}
+
+// Palette "mélange de couleurs" : passeport 1 = bleu, 2 = jaune, 3 = rouge...
+// Les combinaisons se mélangent comme des pigments (bleu+jaune=vert, etc.)
+const PALETTE = ["#2C5C86", "#D9A62E", "#B23A2E", "#3F7A6B", "#7A4FA0", "#5B6B3E"];
+const COMBO_COLORS = {
+  "0": PALETTE[0], "1": PALETTE[1], "2": PALETTE[2], "3": PALETTE[3], "4": PALETTE[4], "5": PALETTE[5],
+  "0,1": "#3F8F52", // bleu + jaune = vert
+  "0,2": "#6B4C9A", // bleu + rouge = violet
+  "1,2": "#E0812E", // jaune + rouge = orange
+  "0,1,2": "#6B5B3E", // les trois = brun (mélange complet)
+};
+function blendFallback(indices) {
+  let r = 0, g = 0, b = 0;
+  indices.forEach((i) => {
+    const hex = PALETTE[i % PALETTE.length].replace("#", "");
+    r += parseInt(hex.substr(0, 2), 16); g += parseInt(hex.substr(2, 2), 16); b += parseInt(hex.substr(4, 2), 16);
+  });
+  const n = indices.length;
+  return `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`;
+}
+function colorForIndices(indices) {
+  if (indices.length === 0) return null;
+  const key = [...indices].sort((a, b) => a - b).join(",");
+  return COMBO_COLORS[key] || blendFallback(indices);
+}
+
+// Cartogramme en grille : chaque destination occupe une case de grille
+// proche de sa position géographique réelle (calculé une seule fois).
+const GRID_COLS = 46, GRID_ROWS = 23;
+function computeGridLayout() {
+  const occupied = new Set(); const layout = {};
+  DESTINATIONS.forEach((d) => {
+    const c = COORDS[d.name]; if (!c) return;
+    const [lon, lat] = c;
+    let col = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(((lon + 180) / 360) * GRID_COLS)));
+    let row = Math.max(0, Math.min(GRID_ROWS - 1, Math.floor(((90 - lat) / 180) * GRID_ROWS)));
+    let found = false;
+    for (let radius = 0; radius < 8 && !found; radius++) {
+      for (let dy = -radius; dy <= radius && !found; dy++) {
+        for (let dx = -radius; dx <= radius && !found; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+          const cc = col + dx, rr = row + dy;
+          if (cc < 0 || cc >= GRID_COLS || rr < 0 || rr >= GRID_ROWS) continue;
+          const key = cc + "," + rr;
+          if (!occupied.has(key)) { occupied.add(key); layout[d.name] = { col: cc, row: rr }; found = true; }
+        }
+      }
+    }
+    if (!found) layout[d.name] = { col, row };
+  });
+  return layout;
+}
+const GRID_LAYOUT = computeGridLayout();
+
+function greedyReplace(originAccessSet, restOriginList, programs) {
+  const remaining = new Set(originAccessSet);
+  const chosen = [];
+  while (remaining.size > 0) {
+    let best = null, bestScore = Infinity, bestNew = 0;
+    for (const p of programs) {
+      if (chosen.includes(p.id)) continue;
+      const access = accessSetFor(p, restOriginList);
+      let n = 0;
+      remaining.forEach((c) => access.has(c) && n++);
+      if (n === 0) continue;
+      const score = p.cost / n;
+      if (score < bestScore) { bestScore = score; best = p; bestNew = n; }
+    }
+    if (!best) break;
+    accessSetFor(best, restOriginList).forEach((c) => remaining.delete(c));
+    chosen.push(best.id);
+    if (bestNew === 0) break;
+  }
+  return chosen;
+}
+
+/* ================================== UI ================================== */
+
+const TABS = [{ id: "origin", label: "Origine" }, { id: "programs", label: "Programmes" }, { id: "map", label: "Carte" }];
+
+function App() {
+  const [tab, setTab] = useState("origin");
+  const [origin, setOrigin] = useState("France");
+  const [selected, setSelected] = useState(new Set());
+  const [expanded, setExpanded] = useState(null);
+  const [geo, setGeo] = useState({ status: "loading", features: null });
+
+  // Chargement best-effort d'un vrai fond de carte (frontières réelles).
+  // En cas d'échec (réseau, format inattendu...), on repasse automatiquement
+  // sur le cartogramme en grille — jamais d'écran cassé.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(WORLD_TOPO_URL)
+      .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then((topo) => {
+        const features = decodeTopoJSON(topo);
+        if (!features || features.length < 50) throw new Error("Fond de carte incomplet");
+        if (!cancelled) setGeo({ status: "ready", features });
+      })
+      .catch(() => { if (!cancelled) setGeo({ status: "fallback", features: null }); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const originData = ORIGIN_PASSPORTS[origin];
+  const originAccess = useMemo(() => new Set([...originData.visaFree, ...originData.voa]), [originData]);
+  const restOriginList = useMemo(() => [...originAccess].filter((c) => !HARD_BLOCS.has(c)), [originAccess]);
+
+  // Ordre de sélection préservé (Set conserve l'ordre d'insertion) : sert à
+  // attribuer la couleur "passeport n°1 / n°2 / n°3..." sur la carte.
+  const selectedIds = useMemo(() => [...selected], [selected]);
+  const selectedPrograms = useMemo(() => selectedIds.map((id) => ALL_PROGRAM_LIST.find((p) => p.id === id)).filter(Boolean), [selectedIds]);
+  const accessSets = useMemo(() => selectedPrograms.map((p) => accessSetFor(p, restOriginList)), [selectedPrograms, restOriginList]);
+  const unionAccess = useMemo(() => {
+    const s = new Set();
+    accessSets.forEach((set) => set.forEach((c) => s.add(c)));
+    return s;
+  }, [accessSets]);
+
+  const lost = useMemo(() => [...originAccess].filter((c) => !unionAccess.has(c)), [originAccess, unionAccess]);
+  const kept = originAccess.size - lost.length;
+  const bonus = useMemo(() => [...unionAccess].filter((c) => !originAccess.has(c)), [unionAccess, originAccess]);
+  const totalCost = selectedPrograms.reduce((s, p) => s + p.cost, 0);
+  const replicationPct = Math.round((kept / originAccess.size) * 100);
+
+  function toggleProgram(id) {
+    setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+  function autoSelect() { setSelected(new Set(greedyReplace(originAccess, restOriginList, CBI_PROGRAMS))); }
+  function resetSelection() { setSelected(new Set()); }
+
+  return (
+    <div style={S.page}>
+      <style>{GLOBAL_CSS}</style>
+
+      <header style={S.header}>
+        <div style={S.stampBadge}><span style={S.stampPct}>{replicationPct}%</span><span style={S.stampWord}>COUVERT</span></div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={S.kicker}>Planification de nationalité</div>
+          <h1 style={S.title}>Remplacer un passeport {origin}</h1>
+          <div style={S.headerMetaRow}>
+            <span>{originData.flag} <b>{origin}</b> comme référence</span>
+            <span className="dot">·</span>
+            <span>{selected.size} option{selected.size > 1 ? "s" : ""} retenue{selected.size > 1 ? "s" : ""}</span>
+            <span className="dot">·</span>
+            <span>{fmt(totalCost)}</span>
+          </div>
+        </div>
+      </header>
+
+      <nav style={S.tabs}>
+        {TABS.map((t, i) => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={{ ...S.tabBtn, ...(tab === t.id ? S.tabBtnActive : {}) }}>
+            <span style={S.tabIndex}>{String(i + 1).padStart(2, "0")}</span>{t.label}
+          </button>
+        ))}
+      </nav>
+
+      <main style={S.main}>
+        {tab === "origin" && <OriginTab origin={origin} setOrigin={setOrigin} originData={originData} accessCount={originAccess.size} geo={geo} />}
+        {tab === "programs" && (
+          <ProgramsTab
+            originAccess={originAccess} restOriginList={restOriginList} selected={selected} toggleProgram={toggleProgram}
+            expanded={expanded} setExpanded={setExpanded} autoSelect={autoSelect} resetSelection={resetSelection}
+            totalCost={totalCost} lostNames={lost} bonusNames={bonus} keptCount={kept}
+          />
+        )}
+        {tab === "map" && (
+          <MapTab originAccess={originAccess} restOriginList={restOriginList} selectedPrograms={selectedPrograms} accessSets={accessSets}
+            totalCost={totalCost} replicationPct={replicationPct} lostNames={lost} bonusNames={bonus} geo={geo} />
+        )}
+      </main>
+
+      <footer style={S.footer}>
+        Échantillon pédagogique de {ALL_NAMES.length} destinations. Les blocs Schengen / Royaume-Uni / Amérique du Nord /
+        Asie-Pacifique avancée sont modélisés précisément ; le reste du monde est une estimation de couverture par
+        passeport (Henley Passport Index &amp; sites de programmes CBI, juillet 2026). À vérifier auprès d'un conseiller
+        agréé avant toute décision réelle.
+      </footer>
+    </div>
+  );
+}
+
+/* ---------------------------- Onglet 1 ---------------------------- */
+
+function OriginTab({ origin, setOrigin, originData, accessCount, geo }) {
+  const visaFreeSet = useMemo(() => new Set(originData.visaFree), [originData]);
+  const voaSet = useMemo(() => new Set(originData.voa), [originData]);
+  function cellStyle(name) {
+    if (name === origin) return { fill: COLORS.accentGreen, opacity: 1 }; // on a toujours accès à son propre pays
+    if (visaFreeSet.has(name)) return { fill: COLORS.accentGreen, opacity: 1 };
+    if (voaSet.has(name)) return { fill: COLORS.accentGreen, opacity: 0.5 };
+    return { fill: COLORS.missing, opacity: 0.12 };
+  }
+
+  return (
+    <section>
+      <p className="lede" style={S.p}>
+        Choisissez le passeport que vous envisagez d'abandonner (renonciation, perte de nationalité...).
+        L'onglet Programmes calcule ensuite ce que vous perdriez réellement, et quels passeports
+        obtenus par investissement permettraient de reconstituer cet accès — <b>sans</b> le passeport
+        d'origine.
+      </p>
+      <div style={S.qcmGrid}>
+        {Object.entries(ORIGIN_PASSPORTS).map(([name, d]) => (
+          <button key={name} onClick={() => setOrigin(name)} style={{ ...S.qcmCard, ...(origin === name ? S.qcmCardActive : {}) }}>
+            <span style={S.qcmFlag}>{d.flag}</span><span style={S.qcmName}>{name}</span><span style={S.qcmSub}>{d.rank}</span>
+          </button>
+        ))}
+      </div>
+      <div style={S.ledger}>
+        <LedgerRow label="Destinations accessibles avec ce passeport (échantillon)" value={`${accessCount} / ${ALL_NAMES.length}`} />
+      </div>
+      <ExpandableList
+        buttonLabel={`Voir le détail des ${accessCount} destinations accessibles`}
+        groups={[
+          { label: "Sans visa", names: originData.visaFree },
+          { label: "Visa à l'arrivée / e-visa", names: originData.voa },
+        ]}
+      />
+
+      <div style={S.sectionDivider}><span>Carte des destinations accessibles</span></div>
+      <div style={S.legend}>
+        <LegendItem color={COLORS.accentGreen} label="Sans visa (ou pays d'émission du passeport)" />
+        <LegendItem color={COLORS.accentGreen} opacity={0.5} label="Visa à l'arrivée / e-visa" />
+        <LegendItem color={COLORS.missing} label="Non accessible" />
+      </div>
+      <WorldMapView geo={geo} cellStyle={cellStyle} height={280} emptyHint="Touchez un pays pour voir son nom" />
+    </section>
+  );
+}
+
+// Composant générique : bouton qui déplie une ou plusieurs listes de pays,
+// toujours avec la même structure (utilisé sur les 3 onglets).
+function ExpandableList({ buttonLabel, groups }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ marginTop: 10 }}>
+      <button style={S.expandBtn} onClick={() => setOpen((o) => !o)}>{open ? "▾" : "▸"} {buttonLabel}</button>
+      {open && (
+        <div style={S.expandPanel}>
+          {groups.map((g) => (
+            <div key={g.label} style={S.detailBlock}>
+              <div style={S.detailLabel}>{g.label} ({g.names.length})</div>
+              <div style={S.chipWrap}>
+                {g.names.length
+                  ? [...g.names].sort((a, b) => a.localeCompare(b)).map((n) => <span key={n} style={S.chip}>{n}</span>)
+                  : <span style={S.detailText}>Aucune</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------- Onglet 2 ---------------------------- */
+
+function ProgramsTab({ originAccess, restOriginList, selected, toggleProgram, expanded, setExpanded, autoSelect, resetSelection, totalCost, lostNames, bonusNames, keptCount }) {
+  const [sortEff, setSortEff] = useState(false);
+
+  const rows = CBI_PROGRAMS.map((p) => {
+    const access = accessSetFor(p, restOriginList);
+    let keptAlone = 0;
+    originAccess.forEach((c) => access.has(c) && keptAlone++);
+    return { p, keptAlone, pctAlone: Math.round((keptAlone / originAccess.size) * 100), perDest: keptAlone > 0 ? p.cost / keptAlone : Infinity };
+  });
+  if (sortEff) rows.sort((a, b) => a.perDest - b.perDest);
+
+  return (
+    <section>
+      <div style={S.stickyCounter}>
+        <div style={S.stickyCounterMain}>
+          <span style={{ color: keptCount === originAccess.size ? COLORS.accentGreen : COLORS.ink }}>{keptCount}</span>
+          <span style={S.stickyCounterSlash}> / {originAccess.size}</span>
+          <span style={S.stickyCounterLabel}>destinations couvertes</span>
+        </div>
+        <div style={S.stickyCounterSub}>{fmt(totalCost)} · {selected.size} passeport{selected.size > 1 ? "s" : ""}</div>
+      </div>
+
+      <p className="lede" style={S.p}>
+        Pour chaque option : combien de vos destinations actuelles resteraient couvertes si celle-ci
+        devenait votre seul passeport. Cochez plusieurs options pour cumuler leurs accès respectifs.
+      </p>
+      <div style={S.actionsRow}>
+        <button style={S.primaryBtn} onClick={autoSelect}>Combinaison la plus efficace</button>
+        <button style={S.ghostBtn} onClick={() => setSortEff((s) => !s)}>{sortEff ? "✓ " : ""}Trier par coût / destination</button>
+        <button style={S.ghostBtn} onClick={resetSelection}>Réinitialiser</button>
+      </div>
+
+      <div style={S.programList}>
+        {rows.map(({ p, keptAlone, pctAlone }) => (
+          <ProgramTicket key={p.id} p={p} keptAlone={keptAlone} pctAlone={pctAlone} originAccess={originAccess}
+            isSel={selected.has(p.id)} isOpen={expanded === p.id}
+            onToggleExpand={() => setExpanded(expanded === p.id ? null : p.id)} onToggleSelect={() => toggleProgram(p.id)} />
+        ))}
+      </div>
+
+      <div style={S.upcomingBox}>
+        <div style={S.detailLabel}>Programmes annoncés, pas encore opérationnels</div>
+        <div style={S.upcomingRow}>{UPCOMING_PROGRAMS.map((u) => <span key={u.country} style={S.upcomingChip}>{u.flag} {u.country}</span>)}</div>
+        <p style={S.detailText}>Source : Henley &amp; Partners, 2026 — à surveiller, non inclus dans les calculs.</p>
+      </div>
+
+      <div style={S.sectionDivider}>
+        <span>Nationalités non commercialisables</span>
+      </div>
+      <p className="lede" style={S.p}>
+        Certaines nationalités ne s'achètent pas : elles s'obtiennent après une résidence effective
+        prolongée et une naturalisation discrétionnaire. Sélectionnables comme les options ci-dessus
+        pour visualiser leur effet sur la carte — mais à considérer sur un horizon de plusieurs années,
+        et hors du calcul de « combinaison la plus efficace » (qui ne porte que sur les options achetables).
+      </p>
+      <div style={S.programList}>
+        {RESIDENCY_PROGRAMS.map((p) => {
+          const access = accessSetFor(p, restOriginList);
+          let keptAlone = 0;
+          originAccess.forEach((c) => access.has(c) && keptAlone++);
+          const pctAlone = Math.round((keptAlone / originAccess.size) * 100);
+          return (
+            <ProgramTicket key={p.id} p={p} keptAlone={keptAlone} pctAlone={pctAlone} originAccess={originAccess}
+              isSel={selected.has(p.id)} isOpen={expanded === p.id}
+              onToggleExpand={() => setExpanded(expanded === p.id ? null : p.id)} onToggleSelect={() => toggleProgram(p.id)} />
+          );
+        })}
+      </div>
+      <div style={S.detailNote}>{POLYNESIA_NOTE}</div>
+
+      <div style={S.ledger}>
+        <LedgerRow label="Passeports sélectionnés" value={selected.size} />
+        <LedgerRow label="Coût cumulé estimé" value={fmt(totalCost)} />
+        <LedgerRow label="Destinations couvertes (combinaison actuelle)" value={keptCount} accent={COLORS.accentGreen} />
+        <LedgerRow label="Destinations non couvertes (combinaison actuelle)" value={lostNames.length} accent={lostNames.length ? COLORS.accentRed : COLORS.accentGreen} />
+      </div>
+      <ExpandableList
+        buttonLabel={`Détail des ${lostNames.length} destinations non couvertes et des ${bonusNames.length} destinations supplémentaires`}
+        groups={[
+          { label: "Non couvertes (aucune option sélectionnée)", names: lostNames },
+          { label: "Supplémentaires (absentes du passeport d'origine)", names: bonusNames },
+        ]}
+      />
+    </section>
+  );
+}
+
+function ProgramTicket({ p, keptAlone, pctAlone, originAccess, isSel, isOpen, onToggleExpand, onToggleSelect }) {
+  const lostBlocs = lostBlocsFor(p);
+  return (
+    <div style={{ ...S.ticket, ...(isSel ? S.ticketActive : {}) }}>
+      <button style={S.ticketHead} onClick={onToggleExpand}>
+        <span style={S.qcmFlag}>{p.flag}</span>
+        <div style={{ flex: 1, textAlign: "left", minWidth: 0 }}>
+          <div style={S.programName}>{p.country}{p.slow ? " (voie lente)" : ""}</div>
+          <div style={S.programMethod}>{p.cost ? fmt(p.cost) : p.costLabel} · {p.timeline}</div>
+        </div>
+        <span style={S.chevron}>{isOpen ? "▾" : "▸"}</span>
+      </button>
+      <div style={S.perforation} />
+      <div style={S.ticketFoot}>
+        <div>
+          <div style={{ ...S.programApport, color: pctAlone >= 70 ? COLORS.accentGreen : pctAlone >= 30 ? COLORS.accent : COLORS.accentRed }}>
+            {pctAlone}% couvert seul
+          </div>
+          <div style={S.programTimeline}>{keptAlone} / {originAccess.size} destinations</div>
+        </div>
+        <button style={{ ...S.selectBtn, ...(isSel ? S.selectBtnActive : {}) }} onClick={onToggleSelect}>
+          {isSel ? "✓ Sélectionné" : "Sélectionner"}
+        </button>
+      </div>
+      {isOpen && (
+        <div style={S.detailPanel}>
+          <div style={S.detailBlock}>
+            <div style={S.detailLabel}>Conditions</div>
+            <ul style={S.detailList}>{p.requirements.map((r, i) => <li key={i}>{r}</li>)}</ul>
+          </div>
+          <div style={S.detailBlock}>
+            <div style={S.detailLabel}>Ce que ce passeport, seul, ne couvre pas</div>
+            {lostBlocs.length ? (
+              <p style={S.detailText}>Accès sans visa non couvert : <b>{lostBlocs.join(" ; ")}</b>{p.restFrac < 1 ? ", ainsi qu'une partie du reste du monde (Afrique, Amérique latine, Asie...)." : "."}</p>
+            ) : (
+              <p style={S.detailText}>Aucun bloc majeur manquant — ce passeport reproduit la quasi-totalité de votre mobilité actuelle.</p>
+            )}
+            {p.bonusGain && p.bonusGain.length > 0 && (
+              <p style={S.detailText}>Destinations supplémentaires, absentes de votre passeport actuel : <b>{p.bonusGain.join(", ")}</b>.</p>
+            )}
+          </div>
+          {p.note && <div style={S.detailNote}>{p.note}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------- Onglet 3 : carte du monde zoomable ---------------------------- */
+
+function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+// Carte du monde réutilisable (zoom/pan, frontières réelles si dispo, repli
+// en cartogramme sinon). `cellStyle(name)` retourne { fill, opacity }.
+function WorldMapView({ geo, cellStyle, height = 320, emptyHint = "Touchez un pays pour voir son nom" }) {
+  const [hover, setHover] = useState(null);
+  const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
+  const dragging = useRef(false);
+  const lastPos = useRef({ x: 0, y: 0 });
+  const pinchDist = useRef(null);
+
+  const cellW = 1000 / GRID_COLS, cellH = 500 / GRID_ROWS;
+
+  const geoLayer = useMemo(() => {
+    if (geo.status !== "ready") return null;
+    try {
+      const fc = { type: "FeatureCollection", features: geo.features };
+      const projection = d3.geoEqualEarth().fitSize([1000, 500], fc);
+      const pathGen = d3.geoPath(projection);
+      const byCode = {};
+      geo.features.forEach((f) => { if (f.id != null) byCode[String(Number(f.id))] = f; });
+      const matched = {}; const unmatched = [];
+      DESTINATIONS.forEach((d) => {
+        const code = ISO_NUM[d.name];
+        const feature = code != null ? byCode[String(code)] : null;
+        const dPath = feature ? pathGen(feature) : null;
+        if (dPath) matched[d.name] = dPath; else unmatched.push(d.name);
+      });
+      return { projection, matched, unmatched };
+    } catch (e) {
+      return null;
+    }
+  }, [geo]);
+
+  function onMouseDown(e) { dragging.current = true; lastPos.current = { x: e.clientX, y: e.clientY }; }
+  function onMouseMove(e) {
+    if (!dragging.current) return;
+    const dx = e.clientX - lastPos.current.x, dy = e.clientY - lastPos.current.y;
+    lastPos.current = { x: e.clientX, y: e.clientY };
+    setView((v) => ({ ...v, tx: v.tx + dx, ty: v.ty + dy }));
+  }
+  function onMouseUp() { dragging.current = false; }
+  function onTouchStart(e) {
+    if (e.touches.length === 1) { dragging.current = true; lastPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; pinchDist.current = null; }
+    else if (e.touches.length === 2) {
+      dragging.current = false;
+      const [a, b] = e.touches;
+      pinchDist.current = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), scale: view.scale };
+    }
+  }
+  function onTouchMove(e) {
+    if (e.touches.length === 2 && pinchDist.current) {
+      const [a, b] = e.touches;
+      const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      const ratio = pinchDist.current.d > 0 ? d / pinchDist.current.d : 1;
+      setView((v) => ({ ...v, scale: clamp(pinchDist.current.scale * ratio, 0.7, 6) }));
+    } else if (e.touches.length === 1 && dragging.current) {
+      const dx = e.touches[0].clientX - lastPos.current.x, dy = e.touches[0].clientY - lastPos.current.y;
+      lastPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      setView((v) => ({ ...v, tx: v.tx + dx, ty: v.ty + dy }));
+    }
+  }
+  function onTouchEnd() { dragging.current = false; pinchDist.current = null; }
+  function onWheel(e) { setView((v) => ({ ...v, scale: clamp(v.scale * (e.deltaY < 0 ? 1.15 : 0.87), 0.7, 6) })); }
+  function zoomBy(f) { setView((v) => ({ ...v, scale: clamp(v.scale * f, 0.7, 6) })); }
+  function resetView() { setView({ scale: 1, tx: 0, ty: 0 }); }
+
+  return (
+    <div style={S.mapWrap}>
+      <div style={S.mapToolbar}>
+        <button style={S.zoomBtn} onClick={() => zoomBy(1.3)}>+</button>
+        <button style={S.zoomBtn} onClick={() => zoomBy(0.77)}>−</button>
+        <button style={S.zoomBtn} onClick={resetView}>⟳</button>
+      </div>
+      <div
+        style={{ ...S.mapViewport, height }}
+        onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
+        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+        onWheel={onWheel}
+      >
+        <div style={{ transform: `translate(${view.tx}px,${view.ty}px) scale(${view.scale})`, transformOrigin: "center center", width: "100%", height: "100%" }}>
+          <svg viewBox="0 0 1000 500" style={S.svg}>
+            <rect x="0" y="0" width="1000" height="500" fill="#eef1ec" />
+            {geoLayer ? (
+              <>
+                {DESTINATIONS.map((d) => {
+                  const dAttr = geoLayer.matched[d.name]; if (!dAttr) return null;
+                  const st = cellStyle(d.name);
+                  return (
+                    <path key={d.name} d={dAttr} fill={st.fill} opacity={st.opacity}
+                      stroke="#fff" strokeWidth="0.4"
+                      onClick={() => setHover(d.name)} onMouseEnter={() => setHover(d.name)}>
+                      <title>{d.name}</title>
+                    </path>
+                  );
+                })}
+                {DESTINATIONS.filter((d) => geoLayer.unmatched.includes(d.name)).map((d) => {
+                  const c = COORDS[d.name]; if (!c) return null;
+                  const pt = geoLayer.projection(c); if (!pt) return null;
+                  const st = cellStyle(d.name);
+                  return (
+                    <circle key={d.name} cx={pt[0]} cy={pt[1]} r="4.5" fill={st.fill} opacity={st.opacity}
+                      stroke="#fff" strokeWidth="0.8"
+                      onClick={() => setHover(d.name)} onMouseEnter={() => setHover(d.name)}>
+                      <title>{d.name} (micro-État, marqueur)</title>
+                    </circle>
+                  );
+                })}
+              </>
+            ) : (
+              DESTINATIONS.map((d) => {
+                const g = GRID_LAYOUT[d.name]; if (!g) return null;
+                const st = cellStyle(d.name);
+                return (
+                  <rect key={d.name} x={g.col * cellW + 0.6} y={g.row * cellH + 0.6}
+                    width={cellW - 1.2} height={cellH - 1.2} rx="1.2"
+                    fill={st.fill} opacity={st.opacity}
+                    onClick={() => setHover(d.name)} onMouseEnter={() => setHover(d.name)}>
+                    <title>{d.name}</title>
+                  </rect>
+                );
+              })
+            )}
+          </svg>
+        </div>
+      </div>
+      <div style={S.mapHoverTag}>{hover || emptyHint}</div>
+    </div>
+  );
+}
+
+function MapTab({ originAccess, restOriginList, selectedPrograms, accessSets, totalCost, replicationPct, lostNames, bonusNames, geo }) {
+  function coveringIndices(name) {
+    const idx = [];
+    accessSets.forEach((set, i) => { if (set.has(name)) idx.push(i); });
+    return idx;
+  }
+  function cellStyle(name) {
+    const idx = coveringIndices(name);
+    const inOrigin = originAccess.has(name);
+    if (idx.length > 0) return { fill: colorForIndices(idx), opacity: 1 };
+    if (inOrigin) return { fill: COLORS.missing, opacity: 0.55 }; // perdu : grisé, opacité faible
+    return { fill: COLORS.missing, opacity: 0.12 }; // jamais concerné : quasi invisible
+  }
+
+  return (
+    <section>
+      <p className="lede" style={S.p}>
+        Carte du monde avec frontières réelles quand elles sont disponibles (sinon repli schématique).
+        Glissez pour déplacer, pincez ou utilisez les boutons pour zoomer.
+      </p>
+
+      <div style={S.legend}>
+        {selectedPrograms.map((p, i) => (
+          <LegendItem key={p.id} color={PALETTE[i % PALETTE.length]} label={`${p.flag} ${p.country}`} />
+        ))}
+        {selectedPrograms.length >= 2 && <LegendItem color={COMBO_COLORS["0,1"]} label={`${selectedPrograms[0].flag}+${selectedPrograms[1].flag} combinés`} />}
+        {selectedPrograms.length >= 3 && (
+          <>
+            <LegendItem color={COMBO_COLORS["0,2"]} label={`${selectedPrograms[0].flag}+${selectedPrograms[2].flag} combinés`} />
+            <LegendItem color={COMBO_COLORS["1,2"]} label={`${selectedPrograms[1].flag}+${selectedPrograms[2].flag} combinés`} />
+            <LegendItem color={COMBO_COLORS["0,1,2"]} label="Les 3 combinés" />
+          </>
+        )}
+        <LegendItem color={COLORS.missing} label="Perdu (grisé)" />
+      </div>
+
+      <WorldMapView geo={geo} cellStyle={cellStyle} />
+
+      <div style={S.ledger}>
+        <LedgerRow label="Taux de remplacement" value={replicationPct + "%"} />
+        <LedgerRow label="Passeports de remplacement" value={selectedPrograms.length ? selectedPrograms.map((p) => `${p.flag} ${p.country}`).join(", ") : "aucun"} />
+        <LedgerRow label="Coût total estimé" value={fmt(totalCost)} />
+        <LedgerRow label="Destinations perdues" value={lostNames.length} accent={lostNames.length ? COLORS.stampRed : COLORS.stampGreen} />
+        <LedgerRow label="Destinations bonus" value={bonusNames.length} />
+      </div>
+      <ExpandableList
+        buttonLabel={`Détail des ${lostNames.length} destinations perdues et des ${bonusNames.length} destinations bonus`}
+        groups={[
+          { label: "Perdues", names: lostNames },
+          { label: "Bonus (nouvelles)", names: bonusNames },
+        ]}
+      />
+    </section>
+  );
+}
+
+function LegendItem({ color, label, opacity = 1 }) { return <div style={S.legendItem}><span style={{ ...S.legendSwatch, background: color, opacity }} />{label}</div>; }
+function LedgerRow({ label, value, accent }) {
+  return <div style={S.ledgerRow}><span style={S.ledgerLabel}>{label}</span><span style={{ ...S.ledgerValue, ...(accent ? { color: accent } : {}) }}>{value}</span></div>;
+}
+
+/* ================================ Style ================================ */
+
+const COLORS = {
+  paper: "#F7F7F5", ink: "#16171B", inkSoft: "#6B6B72",
+  accent: "#0F6E5C", accentGreen: "#1E8E5A", accentRed: "#D14343",
+  line: "#E7E7E3", card: "#FFFFFF",
+  // alias conservés pour compatibilité interne
+  brass: "#0F6E5C", stampRed: "#D14343", stampGreen: "#1E8E5A",
+  originFree: "#1E8E5A", addedFree: "#2C5C86", missing: "#DEDEDA",
+};
+const CELL_COLORS = { kept: COLORS.originFree, lost: COLORS.stampRed, bonus: COLORS.addedFree, outscope: COLORS.missing };
+
+const GLOBAL_CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+* { box-sizing: border-box; }
+body { margin: 0; }
+.lede { max-width: 640px; }
+.dot { opacity: 0.4; margin: 0 2px; }
+button { font-family: inherit; }
+`;
+
+const S = {
+  page: { minHeight: "100vh", background: COLORS.paper, color: COLORS.ink, fontFamily: "'Inter', sans-serif", paddingBottom: 30, WebkitFontSmoothing: "antialiased" },
+  header: { display: "flex", gap: 14, alignItems: "flex-start", padding: "22px 20px 20px" },
+  stampBadge: { flexShrink: 0, width: 56, height: 56, borderRadius: 16, background: COLORS.ink, color: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" },
+  stampPct: { fontSize: 17, lineHeight: 1, fontWeight: 800, fontFamily: "'IBM Plex Mono', monospace" }, stampWord: { fontSize: 7, letterSpacing: "0.06em", opacity: 0.7, marginTop: 2 },
+  kicker: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: "0.1em", color: COLORS.accent, marginBottom: 5, fontWeight: 600, textTransform: "uppercase" },
+  title: { fontFamily: "'Inter', sans-serif", fontWeight: 800, fontSize: 21, margin: "0 0 8px", lineHeight: 1.25, letterSpacing: "-0.01em" },
+  headerMetaRow: { display: "flex", flexWrap: "wrap", gap: 4, fontSize: 12.5, color: COLORS.inkSoft, fontWeight: 500 },
+
+  tabs: { display: "flex", gap: 4, padding: "8px 20px", position: "sticky", top: 0, zIndex: 20, background: `${COLORS.paper}F2`, backdropFilter: "blur(6px)", borderBottom: `1px solid ${COLORS.line}` },
+  tabBtn: { display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", background: "transparent", border: "none", borderRadius: 20, fontFamily: "'Inter', sans-serif", fontWeight: 600, fontSize: 13.5, color: COLORS.inkSoft, cursor: "pointer" },
+  tabBtnActive: { color: "#fff", background: COLORS.ink },
+  tabIndex: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, opacity: 0.6 },
+
+  main: { padding: "20px 20px", maxWidth: 960, margin: "0 auto" },
+  p: { color: COLORS.inkSoft, lineHeight: 1.55, marginBottom: 20, fontSize: 13.5 },
+
+  qcmGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10, marginBottom: 22 },
+  qcmCard: { display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4, padding: "14px 15px", background: COLORS.card, border: `1px solid ${COLORS.line}`, borderRadius: 14, cursor: "pointer", textAlign: "left", boxShadow: "0 1px 2px rgba(16,17,20,0.04)" },
+  qcmCardActive: { border: `1.5px solid ${COLORS.ink}`, boxShadow: "0 4px 14px rgba(16,17,20,0.12)" },
+  qcmFlag: { fontSize: 21 }, qcmName: { fontWeight: 700, fontSize: 14 },
+  qcmSub: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: COLORS.inkSoft, lineHeight: 1.4 },
+
+  ledger: { background: COLORS.card, border: `1px solid ${COLORS.line}`, borderRadius: 14, padding: "6px 16px", boxShadow: "0 1px 2px rgba(16,17,20,0.04)" },
+  ledgerRow: { display: "flex", justifyContent: "space-between", gap: 14, alignItems: "flex-start", fontSize: 13, borderBottom: `1px solid ${COLORS.line}`, padding: "11px 0" },
+  ledgerLabel: { color: COLORS.inkSoft, flexShrink: 0 },
+  ledgerValue: { fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, textAlign: "right" },
+
+  actionsRow: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 },
+  primaryBtn: { background: COLORS.ink, color: "#fff", border: "none", borderRadius: 10, padding: "10px 16px", fontWeight: 600, fontSize: 13, cursor: "pointer" },
+  ghostBtn: { background: COLORS.card, color: COLORS.inkSoft, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: "9px 16px", fontSize: 13, cursor: "pointer", fontWeight: 500 },
+
+  programList: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 },
+  ticket: { background: COLORS.card, border: `1px solid ${COLORS.line}`, borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 2px rgba(16,17,20,0.04)" },
+  ticketActive: { border: `1.5px solid ${COLORS.accent}` },
+  ticketHead: { width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "13px 14px", background: "transparent", border: "none", cursor: "pointer", textAlign: "left" },
+  programName: { fontWeight: 700, fontSize: 14.5 },
+  programMethod: { fontSize: 11.5, color: COLORS.inkSoft, marginTop: 1 },
+  chevron: { color: COLORS.inkSoft, fontSize: 14 },
+  perforation: { borderTop: `1px solid ${COLORS.line}`, margin: "0 14px" },
+  ticketFoot: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", padding: "10px 14px 14px" },
+  programTimeline: { fontSize: 10.5, color: COLORS.inkSoft, marginTop: 2 },
+  programApport: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, fontWeight: 700 },
+  selectBtn: { fontSize: 11.5, padding: "7px 12px", borderRadius: 8, border: `1px solid ${COLORS.line}`, background: "#fff", color: COLORS.inkSoft, cursor: "pointer", fontWeight: 500 },
+  selectBtnActive: { background: COLORS.accent, borderColor: COLORS.accent, color: "#fff" },
+
+  detailPanel: { background: "#FAFAF8", padding: "14px", borderTop: `1px solid ${COLORS.line}` },
+  detailBlock: { marginBottom: 10 },
+  detailLabel: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: "0.07em", color: COLORS.accent, textTransform: "uppercase", marginBottom: 6, fontWeight: 600 },
+  detailList: { margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.6, color: COLORS.ink },
+  detailText: { fontSize: 12.5, lineHeight: 1.6, color: COLORS.ink, margin: "0 0 6px" },
+  detailNote: { fontSize: 12, fontStyle: "italic", color: COLORS.inkSoft, borderLeft: `3px solid ${COLORS.accent}`, paddingLeft: 10, marginTop: 8 },
+
+  upcomingBox: { background: COLORS.card, border: `1px dashed ${COLORS.line}`, borderRadius: 14, padding: 14, marginBottom: 18 },
+  upcomingRow: { display: "flex", flexWrap: "wrap", gap: 8, margin: "8px 0" },
+  upcomingChip: { fontSize: 12, padding: "5px 10px", borderRadius: 20, background: COLORS.paper, border: `1px solid ${COLORS.line}`, color: COLORS.inkSoft },
+
+  sectionDivider: { display: "flex", alignItems: "center", gap: 10, margin: "26px 0 14px", fontSize: 11.5, fontWeight: 700, letterSpacing: "0.04em", color: COLORS.inkSoft, textTransform: "uppercase" },
+  residencyList: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 },
+  residencyCard: { background: COLORS.card, border: `1px solid ${COLORS.line}`, borderRadius: 14, padding: 14 },
+  residencyHead: { display: "flex", alignItems: "center", gap: 10, marginBottom: 8 },
+  residencyAccess: { fontSize: 10.5, color: COLORS.inkSoft, fontFamily: "'IBM Plex Mono', monospace", textAlign: "right" },
+
+  legend: { display: "flex", flexWrap: "wrap", gap: 14, marginBottom: 14 },
+  legendItem: { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: COLORS.inkSoft },
+  legendSwatch: { width: 11, height: 11, borderRadius: "50%", display: "inline-block" },
+
+  mapWrap: { background: COLORS.card, border: `1px solid ${COLORS.line}`, borderRadius: 16, padding: 8, marginBottom: 18, position: "relative", boxShadow: "0 1px 2px rgba(16,17,20,0.04)" },
+  mapToolbar: { position: "absolute", top: 16, right: 16, zIndex: 2, display: "flex", flexDirection: "column", gap: 4 },
+  zoomBtn: { width: 30, height: 30, borderRadius: 8, border: `1px solid ${COLORS.line}`, background: "#fff", color: COLORS.ink, fontSize: 15, fontWeight: 700, cursor: "pointer", lineHeight: 1, boxShadow: "0 1px 3px rgba(16,17,20,0.1)" },
+  mapViewport: { width: "100%", height: 320, overflow: "hidden", touchAction: "none", cursor: "grab", background: "#eef1ec", borderRadius: 10 },
+  svg: { width: "100%", height: "100%", display: "block", borderRadius: 10 },
+  mapHoverTag: { textAlign: "center", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: COLORS.inkSoft, padding: "8px 0 2px" },
+
+  expandBtn: { background: "transparent", border: "none", color: COLORS.accent, fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, cursor: "pointer", padding: "6px 0", fontWeight: 600 },
+  expandPanel: { background: COLORS.card, border: `1px solid ${COLORS.line}`, borderRadius: 12, padding: 14, marginTop: 4 },
+  chipWrap: { display: "flex", flexWrap: "wrap", gap: 5 },
+  chip: { fontSize: 11, padding: "3px 8px", borderRadius: 6, background: COLORS.paper, border: `1px solid ${COLORS.line}`, color: COLORS.ink },
+
+  stickyCounter: {
+    position: "sticky", top: 53, zIndex: 15, background: "rgba(255,255,255,0.92)", backdropFilter: "blur(6px)", border: `1px solid ${COLORS.line}`,
+    borderRadius: 14, padding: "10px 16px", marginBottom: 18, boxShadow: "0 4px 14px rgba(16,17,20,0.08)",
+    display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6,
+  },
+  stickyCounterMain: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 20, fontWeight: 700, display: "flex", alignItems: "baseline", gap: 4 },
+  stickyCounterSlash: { color: COLORS.inkSoft, fontSize: 14, fontWeight: 400 },
+  stickyCounterLabel: { fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: COLORS.inkSoft, marginLeft: 6, fontWeight: 500 },
+  stickyCounterSub: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, color: COLORS.inkSoft },
+
+  footer: { textAlign: "center", fontSize: 10.5, color: COLORS.inkSoft, padding: "12px 20px", lineHeight: 1.5 },
+};
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
