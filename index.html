@@ -357,7 +357,7 @@ function accessSetFor(program, restOriginList) {
   if (program.uk) UK_BLOC.forEach((c) => s.add(c));
   if (program.northam) NORTHAM.forEach((c) => s.add(c));
   program.advApac.forEach((c) => s.add(c));
-  restOriginList.forEach((c) => { if (pseudoRand(program.id, c) < program.restFrac) s.add(c); });
+  restOriginList.forEach((c) => { if (pseudoRand(program.country, c) < program.restFrac) s.add(c); });
   (program.bonusGain || []).forEach((c) => s.add(c));
   if (program.country) s.add(program.country); // on a toujours accès à son propre pays
   return s;
@@ -857,7 +857,7 @@ function WorldMapView({ geo, cellStyle, height = 320, emptyHint = "Touchez un pa
                   const st = cellStyle(d.name);
                   return (
                     <path key={d.name} d={dAttr} fill={st.fill} opacity={st.opacity}
-                      stroke="#fff" strokeWidth="0.4"
+                      stroke={COLORS.ink} strokeOpacity="0.35" strokeWidth="0.6"
                       onClick={() => setHover(d.name)} onMouseEnter={() => setHover(d.name)}>
                       <title>{d.name}</title>
                     </path>
@@ -884,6 +884,7 @@ function WorldMapView({ geo, cellStyle, height = 320, emptyHint = "Touchez un pa
                   <rect key={d.name} x={g.col * cellW + 0.6} y={g.row * cellH + 0.6}
                     width={cellW - 1.2} height={cellH - 1.2} rx="1.2"
                     fill={st.fill} opacity={st.opacity}
+                    stroke={COLORS.ink} strokeOpacity="0.18" strokeWidth="0.5"
                     onClick={() => setHover(d.name)} onMouseEnter={() => setHover(d.name)}>
                     <title>{d.name}</title>
                   </rect>
@@ -981,7 +982,7 @@ button { font-family: inherit; }
 `;
 
 const S = {
-  page: { minHeight: "100vh", background: COLORS.paper, color: COLORS.ink, fontFamily: "'Inter', sans-serif", paddingBottom: 30, WebkitFontSmoothing: "antialiased" },
+  page: { minHeight: "100vh", background: COLORS.paper, color: COLORS.ink, fontFamily: "'Inter', sans-serif", paddingBottom: 30, paddingTop: "env(safe-area-inset-top)", WebkitFontSmoothing: "antialiased" },
   header: { display: "flex", gap: 14, alignItems: "flex-start", padding: "22px 20px 20px" },
   stampBadge: { flexShrink: 0, width: 56, height: 56, borderRadius: 16, background: COLORS.ink, color: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" },
   stampPct: { fontSize: 17, lineHeight: 1, fontWeight: 800, fontFamily: "'IBM Plex Mono', monospace" }, stampWord: { fontSize: 7, letterSpacing: "0.06em", opacity: 0.7, marginTop: 2 },
@@ -989,7 +990,7 @@ const S = {
   title: { fontFamily: "'Inter', sans-serif", fontWeight: 800, fontSize: 21, margin: "0 0 8px", lineHeight: 1.25, letterSpacing: "-0.01em" },
   headerMetaRow: { display: "flex", flexWrap: "wrap", gap: 4, fontSize: 12.5, color: COLORS.inkSoft, fontWeight: 500 },
 
-  tabs: { display: "flex", gap: 4, padding: "8px 20px", position: "sticky", top: 0, zIndex: 20, background: `${COLORS.paper}F2`, backdropFilter: "blur(6px)", borderBottom: `1px solid ${COLORS.line}` },
+  tabs: { display: "flex", gap: 4, padding: "8px 20px", position: "sticky", top: "env(safe-area-inset-top)", zIndex: 20, background: `${COLORS.paper}F2`, backdropFilter: "blur(6px)", borderBottom: `1px solid ${COLORS.line}` },
   tabBtn: { display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", background: "transparent", border: "none", borderRadius: 20, fontFamily: "'Inter', sans-serif", fontWeight: 600, fontSize: 13.5, color: COLORS.inkSoft, cursor: "pointer" },
   tabBtnActive: { color: "#fff", background: COLORS.ink },
   tabIndex: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, opacity: 0.6 },
@@ -1060,7 +1061,7 @@ const S = {
   chip: { fontSize: 11, padding: "3px 8px", borderRadius: 6, background: COLORS.paper, border: `1px solid ${COLORS.line}`, color: COLORS.ink },
 
   stickyCounter: {
-    position: "sticky", top: 53, zIndex: 15, background: "rgba(255,255,255,0.92)", backdropFilter: "blur(6px)", border: `1px solid ${COLORS.line}`,
+    position: "sticky", top: "calc(env(safe-area-inset-top) + 45px)", zIndex: 15, background: "rgba(255,255,255,0.92)", backdropFilter: "blur(6px)", border: `1px solid ${COLORS.line}`,
     borderRadius: 14, padding: "10px 16px", marginBottom: 18, boxShadow: "0 4px 14px rgba(16,17,20,0.08)",
     display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6,
   },
